@@ -33,9 +33,46 @@ class ImportResponse(BaseModel):
     status: str
     message: str
 
+class DatasetAnalytics(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    dataset_id: str
+    healthScore: float = 0.0
+    split: Dict[str, float] = {}
+    qualityIssues: Dict[str, int] = {}
+    classDistribution: List[Dict[str, Any]] = []
+
 class DatasetClient:
     def __init__(self, http: HttpClient):
         self._http = http
+
+    def get_analytics(self, dataset_id: str) -> DatasetAnalytics:
+        """Fetch deep analytics for a dataset."""
+        data = self._http.get(f"/datasets/{dataset_id}/analytics")
+        return DatasetAnalytics(**data)
+
+    def search_roboflow(
+        self,
+        *,
+        api_key: str,
+        query: str = "",
+        workspace: Optional[str] = None,
+        page: int = 0,
+        page_size: int = 50,
+    ) -> List[Dataset]:
+        data = self._http.post(
+            "/datasets/search/roboflow",
+            json_body={
+                "api_key": api_key,
+                "query": query,
+                "workspace": workspace,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+        return [Dataset(**d) for d in data]
+
+    def sync_roboflow(self, *, api_key: str, workspace: str) -> Dict[str, Any]:
+        return self._http.post("/datasets/sync/roboflow", params={"api_key": api_key, "workspace": workspace})
 
     def list(
         self,
@@ -92,6 +129,30 @@ class DatasetClient:
 
     def delete(self, dataset_id: str, *, delete_files: bool = False) -> Dict[str, Any]:
         return self._http.delete(f"/datasets/{dataset_id}", params={"delete_files": delete_files})
+
+    def search_roboflow(
+        self,
+        api_key: str,
+        query: str = "",
+        workspace: Optional[str] = None,
+        page: int = 0,
+        page_size: int = 50,
+    ) -> List[Dataset]:
+        """Live search Roboflow Universe."""
+        payload = {
+            "api_key": api_key,
+            "query": query,
+            "workspace": workspace,
+            "page": page,
+            "page_size": page_size,
+        }
+        data = self._http.post("/datasets/search/roboflow", json_body=payload)
+        return [Dataset(**d) for d in data]
+
+    def sync_roboflow(self, api_key: str, workspace: str) -> Dict[str, Any]:
+        """Sync all datasets from a Roboflow workspace into the local registry."""
+        params = {"api_key": api_key, "workspace": workspace}
+        return self._http.post("/datasets/sync/roboflow", params=params)
 
     def search_roboflow(
         self,

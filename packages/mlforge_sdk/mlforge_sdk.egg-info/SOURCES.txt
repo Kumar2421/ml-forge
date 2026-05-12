@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 mlforge_sdk/__init__.py
 mlforge_sdk/auth.py

@@ -237,11 +237,12 @@ def dataset_list(
     starred: Optional[bool] = typer.Option(None, "--starred", help="Show only starred"),
     limit: int = typer.Option(100, "--limit"),
     offset: int = typer.Option(0, "--offset"),
+    cloud: bool = typer.Option(True, "--cloud/--local", help="Use cloud catalog (default) or local engine"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """List datasets."""
-    sdk = _sdk(host, port)
+    sdk = MLForge() if cloud else _sdk(host, port)
     datasets = sdk.datasets.list(
         task=task,
         format=format,
@@ -270,11 +271,12 @@ def dataset_search_roboflow(
     workspace: Optional[str] = typer.Option(None, "--workspace"),
     page: int = typer.Option(1, "--page"),
     page_size: int = typer.Option(20, "--page-size"),
+    cloud: bool = typer.Option(True, "--cloud/--local", help="Use cloud backend (default) or local engine"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """Live search Roboflow Universe."""
-    sdk = _sdk(host, port)
+    sdk = MLForge() if cloud else _sdk(host, port)
     datasets = sdk.datasets.search_roboflow(
         api_key=api_key,
         query=query,
@@ -296,11 +298,12 @@ def dataset_search_roboflow(
 def dataset_sync_roboflow(
     api_key: str = typer.Option(..., "--api-key", envvar="ROBOFLOW_API_KEY"),
     workspace: str = typer.Option(..., "--workspace", help="Workspace slug"),
+    cloud: bool = typer.Option(True, "--cloud/--local", help="Use cloud backend (default) or local engine"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """Sync all datasets from a Roboflow workspace."""
-    sdk = _sdk(host, port)
+    sdk = MLForge() if cloud else _sdk(host, port)
     result = sdk.datasets.sync_roboflow(api_key=api_key, workspace=workspace)
     console.print(f"[green]Successfully synced {result.get('synced', 0)} datasets from workspace '{workspace}'[/green]")
 
@@ -345,6 +348,61 @@ def dataset_import(
     }
     resp = sdk.datasets.import_dataset(dataset_id, payload)
     console.print(f"Queued import job: {resp.job_id} (dataset_id={resp.dataset_id})")
+
+@dataset_app.command("analytics")
+def dataset_analytics(
+    dataset_id: str = typer.Argument(..., help="Dataset ID to analyze"),
+    cloud: bool = typer.Option(True, "--cloud/--local"),
+    host: Optional[str] = typer.Option(None, "--host"),
+    port: Optional[int] = typer.Option(None, "--port"),
+):
+    """View deep analytics for a dataset (health, quality, distributions)."""
+    sdk = MLForge() if cloud else _sdk(host, port)
+    with console.status(f"Fetching analytics for {dataset_id}..."):
+        a = sdk.datasets.get_analytics(dataset_id)
+
+    # Health Score Panel
+    score = a.healthScore
+    color = "green" if score >= 8 else "yellow" if score >= 6 else "red"
+    health_panel = Panel(
+        f"[bold {color}]{score}/10[/bold {color}]\n" +
+        ("[dim]Excellent[/dim]" if score >= 8 else "[dim]Good[/dim]" if score >= 6 else "[dim]Needs Attention[/dim]"),
+        title="Health Score",
+        expand=False
+    )
+
+    # Split Panel
+    train, val, test = a.split.get("train", 0), a.split.get("val", 0), a.split.get("test", 0)
+    split_table = Table.grid(padding=(0, 1))
+    split_table.add_row("[blue]Train[/blue]", f"{train}%")
+    split_table.add_row("[green]Val[/green]", f"{val}%")
+    split_table.add_row("[yellow]Test[/yellow]", f"{test}%")
+    split_panel = Panel(split_table, title="Split", expand=False)
+
+    # Quality Panel
+    q = a.qualityIssues
+    quality_table = Table.grid(padding=(0, 1))
+    quality_table.add_row("Missing Labels", f"[red]{q.get('missingLabels', 0)}[/red]")
+    quality_table.add_row("Empty Images", f"[yellow]{q.get('emptyImages', 0)}[/yellow]")
+    quality_table.add_row("Duplicates", f"[red]{q.get('duplicates', 0)}[/red]")
+    quality_panel = Panel(quality_table, title="Quality Issues", expand=False)
+
+    console.print(Columns([health_panel, split_panel, quality_panel]))
+
+    # Class Distribution Table
+    if a.classDistribution:
+        dist_table = Table(title=f"Class Distribution (Top {len(a.classDistribution)})", box=None)
+        dist_table.add_column("Class", style="cyan")
+        dist_table.add_column("Count", justify="right")
+        dist_table.add_column("Distribution")
+        
+        max_count = max(c.get("count", 1) for c in a.classDistribution)
+        for c in a.classDistribution[:10]:
+            count = c.get("count", 0)
+            bar_width = int((count / max_count) * 20)
+            dist_table.add_row(c.get("name", "—"), str(count), "█" * bar_width)
+        
+        console.print(dist_table)
 
 @benchmark_app.command("results")
 def benchmark_results(
