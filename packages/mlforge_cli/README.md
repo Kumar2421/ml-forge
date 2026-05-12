@@ -1,50 +1,111 @@
 # MLForge CLI ⚒️
+### The Industrial-Grade Bridge Between Cloud Intelligence and Local Execution
 
-**Industrial-Grade Hybrid ML Platform: Cloud Intelligence, Local Execution.**
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/mlforge-cli/)
+[![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8%2B-green.svg)](https://python.org)
 
-MLForge CLI is the terminal interface for the MLForge Studio environment. It provides a seamless bridge between a global model/dataset registry and your local hardware.
+**MLForge** is a universal training and deployment platform designed for high-performance AIML engineering. It eliminates the friction between discovering state-of-the-art models and executing them on local hardware. Built with a **Brain & Muscle** architecture, MLForge provides a curated cloud registry of 600+ models while keeping 100% of your data and compute local.
 
-## 🌟 Key Capabilities
+---
 
-- **Hybrid Architecture**: Discovery via Cloud Registry ("The Brain"), Compute via Local Engine ("The Muscle").
-- **Full Workspace Management**: Create and manage projects directly from the terminal.
-- **Embedded UI**: Launch the "Forge Dark" React dashboard with a single command.
-- **Production-Ready**: Built-in telemetry, audit logging, and hardware acceleration (CUDA/CPU).
+## 🛠️ The "Brain & Muscle" Architecture
+
+MLForge is uniquely structured to provide the best of both worlds:
+
+- **The Brain (Cloud Registry)**: A central intelligence hub hosted on Hugging Face Spaces that crawls, normalizes, and curates the global model zoo. It provides metadata, compatibility gates, and optimized download links.
+- **The Muscle (Local Engine)**: A hardened Python backend that runs on your local workstation. It handles heavy GPU/CPU tensor computation, dataset management, and hardware telemetry.
+
+---
+
+## 🌟 Core Capabilities
+
+### 1. Unified Model Zoo
+Instantly access over 600+ pre-configured models for Object Detection, Classification, Segmentation, and Generative AI.
+```bash
+$ mlforge list-models --task detection
+```
+> **Visual Model Explorer:**
+> ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━┓
+> ┃ ID                         ┃ Name                ┃ Task           ┃ Status ┃
+> ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━┩
+> │ ultralytics_yolov8         │ YOLOv8              │ detection      │ Remote │
+> │ facebook_dinov2-base       │ DINOv2 Base         │ embedding      │ Remote │
+> │ stabilityai_sdxl-turbo     │ SDXL Turbo          │ generation     │ Remote │
+> └────────────────────────────┴─────────────────────┴────────────────┴────────┘
+
+### 2. Universal Inference Pipeline
+Run inference across different frameworks (PyTorch, ONNX, Transformers) using a single, consistent command. Support for advanced flags like `--conf`, `--iou`, and `--precision` ensures production-ready results.
+
+### 3. Local-First Training
+Start and monitor training runs directly from your terminal. Track metrics, best-performance values, and hardware vitals (VRAM/CPU) in real-time.
+
+### 4. Zero-Config Dashboard
+Need a visual interface? Launch the **Forge Dark** React dashboard with one command. It mirrors all CLI features in a high-fidelity triple-column workspace.
+```bash
+$ mlforge start
+```
+
+---
 
 ## 📦 Installation
 
+Install the CLI and SDK via pip:
 ```bash
 pip install mlforge-cli
 ```
 
-## 🚀 Usage
+*Prerequisites: Python 3.8+, NVIDIA Drivers (for CUDA acceleration).*
 
-### Start the Engine & UI
-Launch the local backend engine and open the visual dashboard in your browser:
+---
+
+## 🚀 Professional Workflow
+
+### Step 1: Discover
+Find the right model for your task in the global registry.
 ```bash
-mlforge start
+mlforge explore models --task segmentation
 ```
 
-### Explore the Model Zoo
-Search and discover models in the curated registry:
+### Step 2: Acquire
+Download and cache the model for local use.
 ```bash
-mlforge list-models --task detection
+mlforge explore download <model_id>
 ```
 
-### Run Inference
-Execute high-performance inference with advanced controls:
+### Step 3: Run
+Execute inference on local assets with granular control.
 ```bash
-mlforge infer run <model_id> <image_path> --conf 0.5 --iou 0.45
+mlforge infer run yolov8 input.jpg --conf 0.5 --device cuda
 ```
 
-### Manage Datasets
-List your local datasets and their analytics:
+### Step 4: Validate
+Benchmark the model across different precisions (FP32, FP16, INT8) to find the optimal deployment strategy.
 ```bash
-mlforge list-datasets
+mlforge benchmark results
 ```
 
-## 🛡️ Security
-MLForge CLI follows a local-first security model. The backend binds to `127.0.0.1` by default, ensuring your local hardware and data remain private and protected.
+---
 
-## 📄 License
-© 2026 MLForge Team. All rights reserved. Proprietary software.
+## 🛡️ Security & Privacy
+
+In an era of cloud-privacy concerns, MLForge takes a stand:
+- **Local-Only Binding**: The engine binds to `127.0.0.1` by default.
+- **Data Sovereignty**: Your datasets and model weights never leave your machine.
+- **Audit Logs**: Every execution is logged in a local SQLite database for traceability and compliance.
+- **Redacted Logs**: Proprietary tokens and secrets are automatically masked in all outputs.
+
+---
+
+## 🗺️ Roadmap
+- [ ] **Async SDK Client**: High-concurrency support for large-scale deployments.
+- [ ] **One-Click Cloud Deploy**: Export local models directly to AWS/GCP/Azure.
+- [ ] **Audio/NLP Adapters**: Expanding the "Brain" beyond Computer Vision.
+
+---
+
+## 📄 License & Terms
+© 2026 MLForge Team. This software is proprietary. For enterprise licensing and support, contact the MLForge Team.
+
+---
+*Industrial-Grade AIML Infrastructure. Built for the Forge.*
