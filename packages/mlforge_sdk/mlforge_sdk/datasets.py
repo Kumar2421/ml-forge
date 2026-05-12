@@ -92,3 +92,25 @@ class DatasetClient:
 
     def delete(self, dataset_id: str, *, delete_files: bool = False) -> Dict[str, Any]:
         return self._http.delete(f"/datasets/{dataset_id}", params={"delete_files": delete_files})
+
+    def search_roboflow(
+        self,
+        api_key: str,
+        query: str,
+        workspace: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> List[Dataset]:
+        payload = {
+            "api_key": api_key,
+            "query": query,
+            "workspace": workspace,
+            "page": page,
+            "page_size": page_size,
+        }
+        data = self._http.post("/datasets/search/roboflow", json_body=payload)
+        return [Dataset(**d) for d in data]
+
+    def sync_roboflow(self, api_key: str, workspace: str) -> Dict[str, Any]:
+        params = {"api_key": api_key, "workspace": workspace}
+        return self._http.post("/datasets/sync/roboflow", params=params)

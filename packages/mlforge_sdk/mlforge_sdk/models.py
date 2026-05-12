@@ -23,12 +23,37 @@ class ModelRegistry:
     def __init__(self, http: HttpClient):
         self._http = http
 
-    def list(self, task: Optional[str] = None, downloaded: Optional[bool] = None) -> List[Model]:
-        params = {}
+    def list(
+        self,
+        task: Optional[str] = None,
+        downloaded: Optional[bool] = None,
+        search: Optional[str] = None,
+        framework: Optional[List[str]] = None,
+        hardware: Optional[List[str]] = None,
+        source: Optional[List[str]] = None,
+        sort_by: str = "downloads",
+        sort_dir: str = "desc",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> List[Model]:
+        params: dict = {
+            "sort_by": sort_by,
+            "sort_dir": sort_dir,
+            "limit": limit,
+            "offset": offset,
+        }
         if task:
             params["task"] = task
         if downloaded is not None:
             params["downloaded"] = downloaded
+        if search:
+            params["search"] = search
+        if framework:
+            params["framework"] = framework
+        if hardware:
+            params["hardware"] = hardware
+        if source:
+            params["source"] = source
 
         data = self._http.get("/models", params=params)
         return [Model(**m) for m in data]

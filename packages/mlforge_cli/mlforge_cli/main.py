@@ -141,14 +141,39 @@ def whoami():
 
 @explore_app.command("models")
 def explore_models(
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="FTS search query"),
     task: Optional[str] = typer.Option(None, "--task", "-t", help="Filter by task"),
+    framework: Optional[str] = typer.Option(None, "--framework", "-f", help="Filter by framework (pytorch|onnx)"),
+    hardware: Optional[str] = typer.Option(None, "--hardware", help="Filter by hardware (cpu|cuda)"),
+    source: Optional[str] = typer.Option(None, "--source", help="Filter by source (hf|local|onnx)"),
     cached: Optional[bool] = typer.Option(None, "--cached", "-c", help="Show only cached models"),
+    sort_by: str = typer.Option("downloads", "--sort-by", help="downloads|accuracy|created_at"),
+    sort_dir: str = typer.Option("desc", "--sort-dir", help="asc|desc"),
+    limit: int = typer.Option(200, "--limit", help="Max results"),
+    offset: int = typer.Option(0, "--offset"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """List available models in the Model Zoo."""
     sdk = _sdk(host, port)
-    models = sdk.models.list(task=task, downloaded=cached)
+    
+    # Process comma-separated lists for SDK
+    frameworks = framework.split(",") if framework else None
+    hardwares = hardware.split(",") if hardware else None
+    sources = source.split(",") if source else None
+
+    models = sdk.models.list(
+        task=task,
+        downloaded=cached,
+        search=search,
+        framework=frameworks,
+        hardware=hardwares,
+        source=sources,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        limit=limit,
+        offset=offset
+    )
     table = Table(title="MLForge Model Zoo")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
@@ -204,15 +229,29 @@ def train_list_runs(
 
 @dataset_app.command("list")
 def dataset_list(
-    source: Optional[str] = typer.Option(None, "--source", help="Filter by source (roboflow|huggingface|local|roboflow_curl)"),
-    status: Optional[str] = typer.Option(None, "--status", help="Filter by status"),
+    task: Optional[str] = typer.Option(None, "--task", "-t", help="Filter by task"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Filter by format (yolo|coco|voc|...)"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="Filter by source (roboflow|huggingface|local|roboflow_curl)"),
+    status: Optional[str] = typer.Option(None, "--status", help="Filter by status (available|imported)"),
     search: Optional[str] = typer.Option(None, "--search", help="Search query"),
+    starred: Optional[bool] = typer.Option(None, "--starred", help="Show only starred"),
+    limit: int = typer.Option(100, "--limit"),
+    offset: int = typer.Option(0, "--offset"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """List datasets."""
     sdk = _sdk(host, port)
-    datasets = sdk.datasets.list(source=source, status=status, search=search)
+    datasets = sdk.datasets.list(
+        task=task,
+        format=format,
+        source=source,
+        status=status,
+        search=search,
+        starred=starred,
+        limit=limit,
+        offset=offset
+    )
     table = Table(title="MLForge Datasets")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
@@ -222,6 +261,48 @@ def dataset_list(
     for d in datasets:
         table.add_row(d.id, d.name, str(d.images), str(d.classes), d.format or "N/A")
     console.print(table)
+
+
+@dataset_app.command("search-roboflow")
+def dataset_search_roboflow(
+    query: str = typer.Argument(..., help="Search query for Roboflow Universe"),
+    api_key: str = typer.Option(..., "--api-key", envvar="ROBOFLOW_API_KEY"),
+    workspace: Optional[str] = typer.Option(None, "--workspace"),
+    page: int = typer.Option(1, "--page"),
+    page_size: int = typer.Option(20, "--page-size"),
+    host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+):
+    """Live search Roboflow Universe."""
+    sdk = _sdk(host, port)
+    datasets = sdk.datasets.search_roboflow(
+        api_key=api_key,
+        query=query,
+        workspace=workspace,
+        page=page,
+        page_size=page_size
+    )
+    table = Table(title=f"Roboflow Search Results: {query}")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Images", style="green")
+    table.add_column("Classes", style="green")
+    for d in datasets:
+        table.add_row(d.id, d.name, str(d.images), str(d.classes))
+    console.print(table)
+
+
+@dataset_app.command("sync-roboflow")
+def dataset_sync_roboflow(
+    api_key: str = typer.Option(..., "--api-key", envvar="ROBOFLOW_API_KEY"),
+    workspace: str = typer.Option(..., "--workspace", help="Workspace slug"),
+    host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+):
+    """Sync all datasets from a Roboflow workspace."""
+    sdk = _sdk(host, port)
+    result = sdk.datasets.sync_roboflow(api_key=api_key, workspace=workspace)
+    console.print(f"[green]Successfully synced {result.get('synced', 0)} datasets from workspace '{workspace}'[/green]")
 
 
 @dataset_app.command("import")
