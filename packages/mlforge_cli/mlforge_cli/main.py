@@ -30,13 +30,22 @@ def _unwrap_typer_value(v: Any) -> Any:
     return v
 
 
-def _sdk(host: str | None = None, port: int | None = None) -> MLForge:
-    # If host is provided, use it. Otherwise, use SDK defaults (which is Cloud).
+def _sdk(host: Any = None, port: Any = None) -> MLForge:
+    """
+    Returns an MLForge SDK instance.
+    Defaults to the local backend (127.0.0.1:8005).
+    Handles Typer OptionInfo objects if called directly.
+    """
     host = _unwrap_typer_value(host)
     port = _unwrap_typer_value(port)
-    if host:
-        return MLForge(host=str(host), port=int(port) if port else 7860)
-    return MLForge()
+
+    # Use defaults if still None
+    host = host or "127.0.0.1"
+    port = port or 8005
+
+    if str(host).startswith("http"):
+        return MLForge(host=str(host), port=int(port))
+    return MLForge(host=f"http://{host}", port=int(port))
 
 
 def _add_global_opts(fn):
@@ -183,7 +192,7 @@ def train_list_runs(
     table.add_column("Run #", style="dim")
     table.add_column("Model", style="cyan")
     table.add_column("Status", style="bold")
-    table.add_column("Best Metric", style="emerald")
+    table.add_column("Best Metric", style="green")
     for r in runs:
         best = "—"
         try:
