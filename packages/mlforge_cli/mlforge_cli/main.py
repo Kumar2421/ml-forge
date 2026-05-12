@@ -3,7 +3,7 @@ import time
 import subprocess
 import sys
 import webbrowser
-from typing import Optional
+from typing import Optional, Any
 
 import typer
 from rich.console import Console
@@ -15,11 +15,27 @@ from mlforge_sdk.auth import delete_token, load_token, save_token
 app = typer.Typer(help="MLForge CLI - Local-first ML workspace (projects → explore → datasets → train/benchmark/infer)")
 console = Console()
 
+def _unwrap_typer_value(v: Any) -> Any:
+    """
+    When a Typer command function is called directly (not via Typer),
+    parameters with defaults like `typer.Option(...)` remain `OptionInfo`.
+    Convert `OptionInfo` to its `.default` to avoid crashes.
+    """
+    try:
+        from typer.models import OptionInfo  # type: ignore
+        if isinstance(v, OptionInfo):
+            return v.default
+    except Exception:
+        pass
+    return v
+
 
 def _sdk(host: str | None = None, port: int | None = None) -> MLForge:
     # If host is provided, use it. Otherwise, use SDK defaults (which is Cloud).
+    host = _unwrap_typer_value(host)
+    port = _unwrap_typer_value(port)
     if host:
-        return MLForge(host=host, port=port or 7860)
+        return MLForge(host=str(host), port=int(port) if port else 7860)
     return MLForge()
 
 
@@ -266,11 +282,34 @@ def infer_run(
     adapter_type: str = typer.Option("yolo", "--adapter-type"),
     precision: str = typer.Option("FP16", "--precision"),
     text: Optional[str] = typer.Option(None, "--text", help="Text prompt/input"),
+    # Advanced YOLO
+    conf: float = typer.Option(0.25, "--conf", help="Confidence threshold (YOLO)"),
+    iou: float = typer.Option(0.45, "--iou", help="IOU threshold (YOLO)"),
+    max_det: int = typer.Option(300, "--max-det", help="Max detections (YOLO)"),
+    # Advanced Transformers
+    temp: float = typer.Option(0.7, "--temp", help="Temperature (Transformers)"),
+    top_p: float = typer.Option(0.9, "--top-p"),
+    max_tokens: int = typer.Option(256, "--max-tokens"),
+    # Execution
+    provider: str = typer.Option("CUDAExecutionProvider", "--provider", help="ONNX Execution Provider"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
     """Run inference (JSON request, like the UI pipeline)."""
     sdk = _sdk(host, port)
+
+    yolo_cfg = None
+    if adapter_type == "yolo":
+        yolo_cfg = {"confidence": conf, "iou_threshold": iou, "max_detections": max_det}
+    
+    trans_cfg = None
+    if adapter_type == "transformers":
+        trans_cfg = {"temperature": temp, "top_p": top_p, "max_new_tokens": max_tokens}
+    
+    onnx_cfg = None
+    if adapter_type == "onnx":
+        onnx_cfg = {"execution_provider": provider}
+
     with console.status(f"Running inference with {model_id}..."):
         result = sdk.inference.run(
             model_id,
@@ -278,6 +317,9 @@ def infer_run(
             adapter_type=adapter_type,
             precision=precision,
             text_input=text,
+            yolo_config=yolo_cfg,
+            transformers_config=trans_cfg,
+            onnx_config=onnx_cfg
         )
 
     if result.status != "ok":
@@ -363,6 +405,23 @@ def run_inference_alias(
     image: Optional[str] = typer.Argument(None),
 ):
     infer_run(model_id=model_id, image=image)
+
+def version_callback(value: bool):
+    if value:
+        console.print(f"MLForge CLI v0.1.0")
+        raise typer.Exit()
+
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None, "--version", callback=version_callback, is_eager=True, help="Show the version and exit."
+    ),
+):
+    """
+    MLForge CLI - Industrial-Grade ML Platform.
+    Manage projects, explore models, and run high-performance training/inference.
+    """
+    pass
 
 if __name__ == "__main__":
     app()
