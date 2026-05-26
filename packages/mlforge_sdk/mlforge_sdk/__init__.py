@@ -5,24 +5,31 @@ from .datasets import DatasetClient
 from .benchmark import BenchmarkClient
 from .inference import InferenceClient
 from .projects import ProjectsClient
-from .auth import load_token
+from .auth import load_token, save_token, delete_token
+from .updates import check_for_updates
 
 class MLForge:
     def __init__(
         self,
-        host: str = "https://senthil2421-mlforge.hf.space",
-        port: int = 7860,
+        host: str = "http://127.0.0.1",
+        port: int = 8005,
         token: str | None = None,
+        api_key: str | None = None,
     ):
-        # Hugging Face Spaces internal port is 7860, external is 443 (HTTPS)
-        # If the user provides a full https URL, we use it directly.
-        if host.startswith("https"):
+        # Default to local engine. Cloud registry is now curated via Gateway.
+        if "://" in host:
             self.base_url = host.rstrip("/")
         else:
-            self.base_url = f"{host}:{port}"
-        # For public registry, token is optional. If no token is provided or found, requests are anonymous.
+            self.base_url = f"http://{host}:{port}"
+            
+        # If the user provided a URL with a protocol but no port, and specified a custom port, append it
+        if "://" in self.base_url and ":" not in self.base_url.split("://")[1] and port:
+             # Only append if not standard 80/443 or if explicitly different from default 8005
+             if port != 80 and port != 443:
+                 self.base_url = f"{self.base_url}:{port}"
+
         effective_token = token or load_token()
-        self.http = HttpClient(self.base_url, token=effective_token)
+        self.http = HttpClient(self.base_url, token=effective_token, api_key=api_key)
 
         # Backward-compatible clients
         self.models = ModelRegistry(self.http)

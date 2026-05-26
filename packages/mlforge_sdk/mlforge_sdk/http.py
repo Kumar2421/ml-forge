@@ -9,12 +9,14 @@ class ApiError(RuntimeError):
 
 
 class HttpClient:
-    def __init__(self, base_url: str, timeout_s: float = 30.0, token: Optional[str] = None):
+    def __init__(self, base_url: str, timeout_s: float = 30.0, token: Optional[str] = None, api_key: Optional[str] = None):
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
         self._headers = {"Accept": "application/json"}
         if token:
             self._headers["Authorization"] = f"Bearer {token}"
+        if api_key:
+            self._headers["x-api-key"] = api_key
 
     def _url(self, path: str) -> str:
         if not path.startswith("/"):

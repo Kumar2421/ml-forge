@@ -50,30 +50,6 @@ class DatasetClient:
         data = self._http.get(f"/datasets/{dataset_id}/analytics")
         return DatasetAnalytics(**data)
 
-    def search_roboflow(
-        self,
-        *,
-        api_key: str,
-        query: str = "",
-        workspace: Optional[str] = None,
-        page: int = 0,
-        page_size: int = 50,
-    ) -> List[Dataset]:
-        data = self._http.post(
-            "/datasets/search/roboflow",
-            json_body={
-                "api_key": api_key,
-                "query": query,
-                "workspace": workspace,
-                "page": page,
-                "page_size": page_size,
-            },
-        )
-        return [Dataset(**d) for d in data]
-
-    def sync_roboflow(self, *, api_key: str, workspace: str) -> Dict[str, Any]:
-        return self._http.post("/datasets/sync/roboflow", params={"api_key": api_key, "workspace": workspace})
-
     def list(
         self,
         *,
@@ -86,7 +62,7 @@ class DatasetClient:
         limit: int = 100,
         offset: int = 0,
     ) -> List[Dataset]:
-        params: Dict[str, Any] = {
+        payload: Dict[str, Any] = {
             "task": task,
             "format": format,
             "source": source,
@@ -96,12 +72,14 @@ class DatasetClient:
             "limit": limit,
             "offset": offset,
         }
-        data = self._http.get("/datasets", params=params)
+        data = self._http.post("/datasets", json_body=payload)
         return [Dataset(**d) for d in data]
 
     def get(self, dataset_id: str) -> Dataset:
-        data = self._http.get(f"/datasets/{dataset_id}")
-        return Dataset(**data)
+        data = self._http.post("/datasets", json_body={"id": dataset_id})
+        if isinstance(data, list) and data:
+            return Dataset(**data[0])
+        raise ApiError(f"Dataset {dataset_id!r} not found via gateway")
 
     def import_dataset(self, dataset_id: str, payload: Dict[str, Any]) -> ImportResponse:
         data = self._http.post(f"/datasets/{dataset_id}/import", json_body=payload)
@@ -151,27 +129,5 @@ class DatasetClient:
 
     def sync_roboflow(self, api_key: str, workspace: str) -> Dict[str, Any]:
         """Sync all datasets from a Roboflow workspace into the local registry."""
-        params = {"api_key": api_key, "workspace": workspace}
-        return self._http.post("/datasets/sync/roboflow", params=params)
-
-    def search_roboflow(
-        self,
-        api_key: str,
-        query: str,
-        workspace: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
-    ) -> List[Dataset]:
-        payload = {
-            "api_key": api_key,
-            "query": query,
-            "workspace": workspace,
-            "page": page,
-            "page_size": page_size,
-        }
-        data = self._http.post("/datasets/search/roboflow", json_body=payload)
-        return [Dataset(**d) for d in data]
-
-    def sync_roboflow(self, api_key: str, workspace: str) -> Dict[str, Any]:
         params = {"api_key": api_key, "workspace": workspace}
         return self._http.post("/datasets/sync/roboflow", params=params)

@@ -5,15 +5,66 @@ import sys
 import webbrowser
 from typing import Optional, Any
 
+from mlforge_sdk import MLForge, delete_token, load_token, save_token
+
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
+from rich.columns import Columns
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich.align import Align
+from rich.theme import Theme
 
-from mlforge_sdk import MLForge
-from mlforge_sdk.auth import delete_token, load_token, save_token
+from . import updates as _updates
 
-app = typer.Typer(help="MLForge CLI - Local-first ML workspace (projects → explore → datasets → train/benchmark/infer)")
-console = Console()
+
+def _resolve_version() -> str:
+    """Resolve installed CLI version, falling back when running from source."""
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        try:
+            return version("ml-forge-cli")
+        except PackageNotFoundError:
+            return "0.1.1"
+    except Exception:
+        return "0.1.1"
+
+
+VERSION = _resolve_version()
+
+# ── Theme & Visuals ──────────────────────────────────────────────────────────
+
+MLFORGE_THEME = Theme({
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "success": "green",
+    "highlight": "bold blue",
+    "dim": "grey50",
+})
+
+console = Console(theme=MLFORGE_THEME)
+
+BANNER = f"""
+[bold blue]
+ ███╗   ███╗██╗     ███████╗ ██████╗ ██████╗  ██████╗ ███████╗
+ ████╗ ████║██║     ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝
+ ██╔████╔██║██║     █████╗  ██║   ██║██████╔╝██║  ███╗█████╗  
+ ██║╚██╔╝██║██║     ██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝  
+ ██║ ╚═╝ ██║███████╗██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗
+ ╚═╝     ╚═╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+[/bold blue]
+[dim]Industrial-Grade ML Workspace | v{VERSION}[/dim]
+"""
+
+def print_banner():
+    console.print(Align.center(BANNER))
+
+app = typer.Typer(
+    help="MLForge CLI - Industrial-grade ML Workspace",
+    rich_markup_mode="rich"
+)
 
 def _unwrap_typer_value(v: Any) -> Any:
     """
@@ -30,34 +81,59 @@ def _unwrap_typer_value(v: Any) -> Any:
     return v
 
 
-def _sdk(host: Any = None, port: Any = None) -> MLForge:
+def _handle_api_error(e: Exception):
+    """
+    Common error handler for SDK/API calls.
+    Suggests 'mlforge start' if connection fails.
+    """
+    import requests
+    from mlforge_sdk.http import ApiError
+    
+    if isinstance(e, requests.exceptions.ConnectionError):
+        console.print("\n[bold red]Error: Could not connect to the MLForge Engine.[/bold red]")
+        console.print("[yellow]The local backend might be offline.[/yellow]")
+        console.print("\n[bold green]To start the backend, run:[/bold green]")
+        console.print("  [white]mlforge start[/white]\n")
+        raise typer.Exit(code=1)
+    
+    if isinstance(e, ApiError):
+        console.print(f"\n[bold red]API Error:[/bold red] {str(e)}")
+        raise typer.Exit(code=1)
+    
+    raise e
+
+
+def _sdk(host: Any = None, port: Any = None, api_key: Optional[str] = None) -> MLForge:
     """
     Returns an MLForge SDK instance.
     Defaults to the local backend (127.0.0.1:8005).
-    Handles Typer OptionInfo objects if called directly.
     """
     host = _unwrap_typer_value(host)
     port = _unwrap_typer_value(port)
+    api_key = _unwrap_typer_value(api_key)
 
     # Use defaults if still None
     host = host or "127.0.0.1"
-    port = port or 8005
+    port = int(port) if port is not None else 8005
+    
+    # Try environment variable if no key provided
+    import os
+    effective_api_key = api_key or os.getenv("MLFORGE_API_KEY")
 
-    if str(host).startswith("http"):
-        return MLForge(host=str(host), port=int(port))
-    return MLForge(host=f"http://{host}", port=int(port))
+    return MLForge(host=str(host), port=port, api_key=effective_api_key)
 
 
 def _add_global_opts(fn):
     return fn
 
 
-project_app = typer.Typer(help="Create/open projects (mirrors WorkspaceDashboard)")
-explore_app = typer.Typer(help="Explore models (mirrors ExploreView)")
-dataset_app = typer.Typer(help="Datasets manager (mirrors DatasetDashboard)")
-train_app = typer.Typer(help="Training runs")
-benchmark_app = typer.Typer(help="Benchmark jobs/results")
-infer_app = typer.Typer(help="Inference")
+project_app = typer.Typer(help="📦 Projects - Manage local ML workspaces")
+explore_app = typer.Typer(help="🔍 Explore - Discover and download curated models")
+dataset_app = typer.Typer(help="💾 Datasets - Discover and manage dataset imports")
+train_app = typer.Typer(help="⚡ Training - Execute and monitor model fine-tuning")
+benchmark_app = typer.Typer(help="📊 Benchmark - Run high-performance hardware tests")
+infer_app = typer.Typer(help="🧠 Inference - Run models directly from the CLI")
+update_app = typer.Typer(help="⬆️  Update - Check PyPI for newer CLI/SDK versions")
 
 app.add_typer(project_app, name="project")
 app.add_typer(explore_app, name="explore")
@@ -65,6 +141,40 @@ app.add_typer(dataset_app, name="dataset")
 app.add_typer(train_app, name="train")
 app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(infer_app, name="infer")
+app.add_typer(update_app, name="update")
+
+
+@update_app.command("check")
+def update_check():
+    """Check PyPI for newer versions of mlforge-cli and mlforge-sdk."""
+    with console.status("Checking PyPI..."):
+        result = _updates.status_report()
+
+    table = Table(title="[bold blue]MLForge Update Status[/bold blue]", box=None)
+    table.add_column("Package", style="cyan")
+    table.add_column("Installed", style="dim")
+    table.add_column("Latest", style="green")
+    table.add_column("Status", style="bold")
+
+    any_update = False
+    for pkg, info in result.get("packages", {}).items():
+        installed = info.get("installed") or "—"
+        latest = info.get("latest") or "unknown"
+        if info.get("installed") and info.get("latest") and installed != latest:
+            status_text = "[bold yellow]update available[/bold yellow]"
+            any_update = True
+        elif info.get("latest") is None:
+            status_text = "[dim]could not reach PyPI[/dim]"
+        else:
+            status_text = "[green]current[/green]"
+        table.add_row(pkg, str(installed), str(latest), status_text)
+
+    console.print(table)
+
+    if any_update:
+        console.print(
+            "\n[bold]To upgrade, run:[/bold] [white]pip install -U ml-forge-cli ml-forge-sdk[/white]\n"
+        )
 
 
 @app.command("start")
@@ -115,11 +225,99 @@ def start_backend(
 
 @app.command("login")
 def login(
-    token: str = typer.Option(..., "--token", help="Hugging Face access token (for private Spaces)"),
+    token: Optional[str] = typer.Option(None, "--token", help="Manually provide token (fallback)"),
 ):
-    """Save Hugging Face token locally for authenticated cloud requests."""
-    save_token(token)
-    console.print("[green]Saved token to ~/.mlforge/credentials.json[/green]")
+    """
+    Authenticate with MLForge. 
+    Opens a browser to mlforge.in to complete the cross-platform web login flow.
+    """
+    if token:
+        save_token(token)
+        console.print("[success]Successfully saved manual token to ~/.mlforge/credentials.json[/success]")
+        return
+
+    import http.server
+    import socketserver
+    import urllib.parse
+    import threading
+
+    login_done = threading.Event()
+    captured_data = {}
+
+    class LoginHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            
+            if "token" in params:
+                captured_data["token"] = params["token"][0]
+                if "user" in params:
+                    try:
+                        captured_data["user"] = json.loads(params["user"][0])
+                    except: pass
+                
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"""
+                    <html><body style='font-family:sans-serif; background:#0f172a; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh;'>
+                        <h1 style='color:#3b82f6;'>Login Successful!</h1>
+                        <p>You can now close this tab and return to your terminal.</p>
+                        <script>setTimeout(() => window.close(), 3000);</script>
+                    </body></html>
+                """)
+                login_done.set()
+            else:
+                self.send_response(400)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            return # silent
+
+    # Attempt to find an open port
+    port = 58261
+    try:
+        httpd = socketserver.TCPServer(("127.0.0.1", port), LoginHandler)
+    except OSError:
+        # Fallback to manual if port is blocked
+        console.print("[warning]Local auth port 58261 is blocked.[/warning]")
+        console.print("Please use: [bold]mlforge login --token YOUR_TOKEN[/bold]")
+        return
+
+    # Start server in background thread
+    server_thread = threading.Thread(target=httpd.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+
+    callback_url = f"http://127.0.0.1:{port}"
+    login_url = f"https://mlforge.in/login?callback={urllib.parse.quote(callback_url)}"
+    
+    console.print(f"\n[bold blue]Opening browser for authentication...[/bold blue]")
+    console.print(f"[dim]URL: {login_url}[/dim]\n")
+    
+    if not webbrowser.open(login_url):
+        console.print("[warning]Could not open browser automatically.[/warning]")
+        console.print(f"Please open this link manually: [underline]{login_url}[/underline]\n")
+
+    console.print("[cyan]Waiting for login to complete...[/cyan] (Ctrl+C to cancel)")
+    
+    try:
+        # Wait for callback or timeout (2 mins)
+        if login_done.wait(timeout=120):
+            token = captured_data["token"]
+            user = captured_data.get("user", {})
+            save_token(token)
+            
+            username = user.get("username", "User")
+            console.print(f"\n[success]Welcome back, {username}![/success]")
+            console.print(f"[green]Authenticated successfully. Session token saved.[/green]")
+        else:
+            console.print("\n[error]Login timed out after 2 minutes.[/error]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Login cancelled.[/yellow]")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 @app.command("logout")
@@ -139,6 +337,84 @@ def whoami():
         console.print("[red]Not authenticated: run mlforge login --token ...[/red]")
 
 
+@app.command("system")
+def system_dashboard():
+    """Real-time hardware telemetry (CPU, GPU, RAM, Disk)."""
+    import psutil
+    import platform
+    try:
+        import cpuinfo
+        cpu_brand = cpuinfo.get_cpu_info().get('brand_raw', 'Unknown CPU')
+    except Exception:
+        cpu_brand = platform.processor()
+
+    # CPU info
+    cpu_usage = psutil.cpu_percent(interval=0.5)
+    cpu_cores = psutil.cpu_count(logical=False)
+    cpu_threads = psutil.cpu_count(logical=True)
+    
+    # RAM info
+    ram = psutil.virtual_memory()
+    
+    # Disk info
+    disk = psutil.disk_usage('/')
+
+    # GPU info (optional)
+    gpu_stats = []
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        device_count = pynvml.nvmlDeviceGetCount()
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name = pynvml.nvmlDeviceGetName(handle)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            gpu_stats.append({
+                "name": name,
+                "used": mem.used / 1024**3,
+                "total": mem.total / 1024**3,
+                "util": util.gpu
+            })
+        pynvml.nvmlShutdown()
+    except Exception:
+        pass
+
+    # Build Panels
+    cpu_panel = Panel(
+        f"[bold cyan]{cpu_brand}[/bold cyan]\n"
+        f"[dim]Cores:[/dim] {cpu_cores} [dim]Threads:[/dim] {cpu_threads}\n"
+        f"[bold]Usage:[/bold] [highlight]{cpu_usage}%[/highlight]",
+        title="[bold]CPU[/bold]", expand=True
+    )
+
+    ram_panel = Panel(
+        f"[bold]Total:[/bold] {ram.total / 1024**3:.1f} GB\n"
+        f"[bold]Used:[/bold] {ram.used / 1024**3:.1f} GB ([highlight]{ram.percent}%[/highlight])",
+        title="[bold]Memory[/bold]", expand=True
+    )
+
+    disk_panel = Panel(
+        f"[bold]Total:[/bold] {disk.total / 1024**3:.1f} GB\n"
+        f"[bold]Free:[/bold] {disk.free / 1024**3:.1f} GB ([highlight]{disk.percent}%[/highlight])",
+        title="[bold]Disk[/bold]", expand=True
+    )
+
+    console.print(Columns([cpu_panel, ram_panel, disk_panel]))
+
+    if gpu_stats:
+        for i, g in enumerate(gpu_stats):
+            gpu_panel = Panel(
+                f"[bold green]{g['name']}[/bold green]\n"
+                f"[bold]VRAM:[/bold] {g['used']:.1f}/{g['total']:.1f} GB\n"
+                f"[bold]Utilization:[/bold] [highlight]{g['util']}%[/highlight]",
+                title=f"[bold]GPU {i}[/bold]", expand=True
+            )
+            console.print(gpu_panel)
+    else:
+        console.print("[dim]No NVIDIA GPU detected or pynvml not installed.[/dim]")
+
+
 @explore_app.command("models")
 def explore_models(
     search: Optional[str] = typer.Option(None, "--search", "-s", help="FTS search query"),
@@ -153,9 +429,25 @@ def explore_models(
     offset: int = typer.Option(0, "--offset"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="MLFORGE_API_KEY", help="MLForge API Key"),
 ):
     """List available models in the Model Zoo."""
-    sdk = _sdk(host, port)
+    host = _unwrap_typer_value(host)
+    port = _unwrap_typer_value(port)
+    api_key = _unwrap_typer_value(api_key)
+    search = _unwrap_typer_value(search)
+    task = _unwrap_typer_value(task)
+    framework = _unwrap_typer_value(framework)
+    hardware = _unwrap_typer_value(hardware)
+    source = _unwrap_typer_value(source)
+    cached = _unwrap_typer_value(cached)
+    sort_by = _unwrap_typer_value(sort_by)
+    sort_dir = _unwrap_typer_value(sort_dir)
+    limit = _unwrap_typer_value(limit)
+    offset = _unwrap_typer_value(offset)
+
+    sdk = _sdk(host, port, api_key)
+
     
     # Process comma-separated lists for SDK
     frameworks = framework.split(",") if framework else None
@@ -174,16 +466,24 @@ def explore_models(
         limit=limit,
         offset=offset
     )
-    table = Table(title="MLForge Model Zoo")
-    table.add_column("ID", style="dim")
-    table.add_column("Name", style="cyan")
+    table = Table(
+        title="[bold blue]MLForge Model Zoo[/bold blue]",
+        box=None,
+        header_style="bold magenta",
+        border_style="dim"
+    )
+    table.add_column("ID", style="dim", width=12)
+    table.add_column("Name", style="bold cyan")
     table.add_column("Task", style="green")
-    table.add_column("Status", style="magenta")
+    table.add_column("Downloads", justify="right")
+    table.add_column("Status", justify="center")
 
     for m in models:
-        status = "Cached" if m.downloaded else "Remote"
-        table.add_row(m.id, m.name, m.task or "N/A", status)
-    console.print(table)
+        status = "[bold green]Cached[/bold green]" if m.downloaded else "[dim]Remote[/dim]"
+        downloads = f"{m.downloads:,}" if hasattr(m, 'downloads') and m.downloads else "0"
+        table.add_row(m.id, m.name, m.task or "N/A", downloads, status)
+    
+    console.print(Panel(table, border_style="blue", padding=(1, 2)))
 
 
 @explore_app.command("download")
@@ -192,18 +492,30 @@ def explore_download_model(
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
 ):
-    """Download a model to local cache (download job)."""
+    """Download a model to local cache with progress bar."""
     sdk = _sdk(host, port)
-    with console.status(f"Triggering download for {model_id}...") as status:
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=40),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task(f"Downloading {model_id}...", total=100)
+        
         job = sdk.models.download(model_id)
-        console.print(f"Download job created: {job.id}")
-
+        
         while job.status not in ["completed", "failed", "cancelled"]:
-            time.sleep(1)
+            time.sleep(0.5)
             job = sdk.models.get_job(job.id)
-            status.update(f"Downloading {model_id}: {job.progress:.1f}%")
-
-        console.print(f"Job status: {job.status}")
+            progress.update(task_id, completed=job.progress)
+        
+        if job.status == "completed":
+            console.print(f"[success]Successfully downloaded {model_id}[/success]")
+        else:
+            console.print(f"[error]Download failed for {model_id}: {job.status}[/error]")
 
 @train_app.command("runs")
 def train_list_runs(
@@ -240,9 +552,10 @@ def dataset_list(
     cloud: bool = typer.Option(True, "--cloud/--local", help="Use cloud catalog (default) or local engine"),
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
     port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="MLFORGE_API_KEY", help="MLForge API Key"),
 ):
     """List datasets."""
-    sdk = MLForge() if cloud else _sdk(host, port)
+    sdk = MLForge(api_key=api_key) if cloud else _sdk(host, port, api_key)
     datasets = sdk.datasets.list(
         task=task,
         format=format,
@@ -253,15 +566,27 @@ def dataset_list(
         limit=limit,
         offset=offset
     )
-    table = Table(title="MLForge Datasets")
-    table.add_column("ID", style="dim")
-    table.add_column("Name", style="cyan")
-    table.add_column("Images", style="green")
-    table.add_column("Classes", style="green")
+    table = Table(
+        title="[bold blue]Local Datasets[/bold blue]",
+        box=None,
+        header_style="bold magenta"
+    )
+    table.add_column("ID", style="dim", width=12)
+    table.add_column("Name", style="bold cyan")
+    table.add_column("Items", justify="right", style="green")
+    table.add_column("Classes", justify="right", style="green")
     table.add_column("Format", style="magenta")
+
     for d in datasets:
-        table.add_row(d.id, d.name, str(d.images), str(d.classes), d.format or "N/A")
-    console.print(table)
+        table.add_row(
+            d.id, 
+            d.name, 
+            f"{d.images:,}" if d.images else "0", 
+            str(d.classes or 0), 
+            d.format or "N/A"
+        )
+    
+    console.print(Panel(table, border_style="blue", padding=(1, 2)))
 
 
 @dataset_app.command("search-roboflow")
@@ -347,7 +672,30 @@ def dataset_import(
         "name": dataset_name,
     }
     resp = sdk.datasets.import_dataset(dataset_id, payload)
-    console.print(f"Queued import job: {resp.job_id} (dataset_id={resp.dataset_id})")
+    
+    if hasattr(resp, 'job_id') and resp.job_id:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task(f"Importing {dataset_id}...", total=100)
+            
+            while True:
+                time.sleep(1)
+                job = sdk.models.get_job(resp.job_id) # Using models.get_job as a generic job poller if available
+                progress.update(task_id, completed=job.progress)
+                if job.status in ["completed", "failed", "cancelled"]:
+                    break
+            
+            if job.status == "completed":
+                console.print(f"[success]Successfully imported {dataset_id}[/success]")
+            else:
+                console.print(f"[error]Import failed: {job.status}[/error]")
+    else:
+        console.print(f"[success]Dataset import initiated for {dataset_id}[/success]")
 
 @dataset_app.command("analytics")
 def dataset_analytics(
@@ -427,9 +775,11 @@ def benchmark_results(
 def infer_run(
     model_id: str = typer.Argument(..., help="Model ID to use"),
     image: Optional[str] = typer.Argument(None, help="Path to input image"),
-    adapter_type: str = typer.Option("yolo", "--adapter-type"),
+    adapter_type: str = typer.Option("auto", "--adapter-type"),
     precision: str = typer.Option("FP16", "--precision"),
     text: Optional[str] = typer.Option(None, "--text", help="Text prompt/input"),
+    video: Optional[str] = typer.Option(None, "--video", help="URL to video file"),
+    rtsp: Optional[str] = typer.Option(None, "--rtsp", help="RTSP stream URL"),
     # Advanced YOLO
     conf: float = typer.Option(0.25, "--conf", help="Confidence threshold (YOLO)"),
     iou: float = typer.Option(0.45, "--iou", help="IOU threshold (YOLO)"),
@@ -447,15 +797,15 @@ def infer_run(
     sdk = _sdk(host, port)
 
     yolo_cfg = None
-    if adapter_type == "yolo":
+    if adapter_type in ["yolo", "auto"]:
         yolo_cfg = {"confidence": conf, "iou_threshold": iou, "max_detections": max_det}
     
     trans_cfg = None
-    if adapter_type == "transformers":
+    if adapter_type in ["transformers", "auto"]:
         trans_cfg = {"temperature": temp, "top_p": top_p, "max_new_tokens": max_tokens}
     
     onnx_cfg = None
-    if adapter_type == "onnx":
+    if adapter_type in ["onnx", "auto"]:
         onnx_cfg = {"execution_provider": provider}
 
     with console.status(f"Running inference with {model_id}..."):
@@ -465,12 +815,15 @@ def infer_run(
             adapter_type=adapter_type,
             precision=precision,
             text_input=text,
+            video_url=video,
+            rtsp_url=rtsp,
             yolo_config=yolo_cfg,
             transformers_config=trans_cfg,
             onnx_config=onnx_cfg
         )
 
     if result.status != "ok":
+        console.print(f"[error]Inference failed: {result.error}[/error]")
         raise typer.Exit(code=1)
 
     console.print(f"Inference OK: total_ms={result.total_ms:.1f} quality={result.quality_score}")
@@ -486,6 +839,120 @@ def infer_run(
                 str([det.get("x1"), det.get("y1"), det.get("x2"), det.get("y2")]),
             )
         console.print(table)
+
+
+@infer_app.command("stream")
+def infer_stream(
+    model_id: str = typer.Argument(..., help="Model ID to use"),
+    video: Optional[str] = typer.Option(None, "--video", help="URL to video file"),
+    rtsp: Optional[str] = typer.Option(None, "--rtsp", help="RTSP stream URL"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8005, "--port"),
+):
+    """
+    Continuous stream inference with a modern dashboard layout.
+    Connects to backend WebSockets for live results and logs.
+    """
+    import asyncio
+    import websockets
+    from rich.live import Live
+    from rich.layout import Layout
+    from rich.text import Text
+    from rich.logging import RichHandler
+    import logging
+
+    # 1. Setup Layout
+    layout = Layout()
+    layout.split_row(
+        Layout(name="logs", ratio=1),
+        Layout(name="results", ratio=1)
+    )
+
+    log_content = []
+    detection_table = Table(title="Live Detections", box=None)
+    detection_table.add_column("Frame", style="dim")
+    detection_table.add_column("Class", style="cyan")
+    detection_table.add_column("Conf", style="green")
+    detection_table.add_column("Latency", style="magenta")
+
+    def make_layout():
+        # Logs panel
+        log_panel = Panel(
+            "\n".join(log_content[-15:]), 
+            title="[bold blue]Live Events[/bold blue]", 
+            border_style="dim"
+        )
+        layout["logs"].update(log_panel)
+        
+        # Results panel
+        layout["results"].update(Panel(detection_table, title="[bold green]Detections[/bold green]"))
+        return layout
+
+    async def run_ws():
+        uri = f"ws://{host}:{port}/api/v1/inference/ws/stream" # Check if prefix is needed
+        # Actually it's just /inference/ws/stream if following the router prefix in main.py
+        # Backend main.py: app.include_router(inference_router.router)
+        # inference.py: router = APIRouter(prefix="/inference", ...)
+        uri = f"ws://{host}:{port}/inference/ws/stream"
+
+        try:
+            async with websockets.connect(uri) as ws:
+                # Send start command
+                await ws.send(json.dumps({
+                    "command": "start",
+                    "request": {
+                        "model_id": model_id,
+                        "adapter_type": "auto",
+                        "video_url": video,
+                        "rtsp_url": rtsp,
+                        "run_mode": "continuous"
+                    }
+                }))
+
+                while True:
+                    msg = await ws.recv()
+                    data = json.loads(msg)
+
+                    if data["type"] == "log":
+                        d = data["data"]
+                        lvl = d.get("level", "INFO")
+                        msg_text = d.get("message", "")
+                        color = "green" if lvl == "INFO" else "yellow" if lvl == "WARNING" else "red"
+                        log_content.append(f"[{color}]{lvl}[/{color}] {msg_text}")
+                    
+                    elif data["type"] == "frame":
+                        fid = data.get("frame_id", 0)
+                        lat = data.get("latency_ms", 0)
+                        dets = data.get("detections", [])
+                        
+                        # Clear table but keep headers
+                        nonlocal detection_table
+                        new_table = Table(title="Live Detections", box=None)
+                        new_table.add_column("Frame", style="dim")
+                        new_table.add_column("Class", style="cyan")
+                        new_table.add_column("Conf", style="green")
+                        new_table.add_column("Latency", style="magenta")
+                        
+                        for det in dets[:10]:
+                            new_table.add_row(
+                                str(fid),
+                                str(det.get("class_name", "—")),
+                                f"{det.get('confidence', 0):.2f}",
+                                f"{lat:.1f}ms"
+                            )
+                        detection_table = new_table
+
+                    elif data["type"] == "error":
+                        log_content.append(f"[bold red]ERROR: {data.get('message')}[/bold red]")
+
+        except Exception as e:
+            log_content.append(f"[bold red]WS Connection Error: {str(e)}[/bold red]")
+
+    try:
+        with Live(make_layout(), refresh_per_second=10) as live:
+            asyncio.run(run_ws())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Streaming stopped.[/yellow]")
 
 @project_app.command("list")
 def project_list(
@@ -519,57 +986,95 @@ def project_open(
 
 # ── Backward compatible aliases ─────────────────────────────────────────────
 
-@app.command("list-models")
+@app.command("list-models", help="Alias for: explore models")
 def list_models_alias(
+    ctx: typer.Context,
     task: Optional[str] = typer.Option(None, "--task", "-t"),
     cached: Optional[bool] = typer.Option(None, "--cached", "-c"),
 ):
-    explore_models(task=task, cached=cached)
+    ctx.invoke(explore_models, task=task, cached=cached)
 
 
-@app.command("download-model")
-def download_model_alias(model_id: str = typer.Argument(...)):
-    explore_download_model(model_id=model_id)
+@app.command("download-model", help="Alias for: explore download")
+def download_model_alias(ctx: typer.Context, model_id: str = typer.Argument(...)):
+    ctx.invoke(explore_download_model, model_id=model_id)
 
 
-@app.command("list-datasets")
-def list_datasets_alias():
-    dataset_list()
+@app.command("list-datasets", help="Alias for: dataset list")
+def list_datasets_alias(ctx: typer.Context):
+    ctx.invoke(dataset_list)
 
 
-@app.command("list-runs")
-def list_runs_alias():
-    train_list_runs()
+@app.command("list-runs", help="Alias for: train list-runs")
+def list_runs_alias(ctx: typer.Context):
+    ctx.invoke(train_list_runs)
 
 
-@app.command("list-benchmarks")
-def list_benchmarks_alias():
-    benchmark_results()
+@app.command("list-benchmarks", help="Alias for: benchmark results")
+def list_benchmarks_alias(ctx: typer.Context):
+    ctx.invoke(benchmark_results)
 
 
-@app.command("run-inference")
+@app.command("run-inference", help="Alias for: infer run")
 def run_inference_alias(
+    ctx: typer.Context,
     model_id: str = typer.Argument(...),
     image: Optional[str] = typer.Argument(None),
 ):
-    infer_run(model_id=model_id, image=image)
+    ctx.invoke(infer_run, model_id=model_id, image=image)
 
 def version_callback(value: bool):
     if value:
-        console.print(f"MLForge CLI v0.1.0")
+        console.print(f"MLForge CLI v{VERSION}")
         raise typer.Exit()
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Optional[bool] = typer.Option(
         None, "--version", callback=version_callback, is_eager=True, help="Show the version and exit."
+    ),
+    no_update_check: bool = typer.Option(
+        False,
+        "--no-update-check",
+        envvar="MLFORGE_NO_UPDATE_CHECK",
+        help="Disable the PyPI update-availability nudge for this invocation.",
     ),
 ):
     """
     MLForge CLI - Industrial-Grade ML Platform.
     Manage projects, explore models, and run high-performance training/inference.
     """
-    pass
+    # Surface a one-line PyPI update nudge (read from local cache; never blocks).
+    # Skip when running the `update` subcommand itself to avoid noise.
+    if not no_update_check and ctx.invoked_subcommand != "update":
+        try:
+            nudge = _updates.startup_nudge()
+            if nudge:
+                console.print(f"[dim yellow]{nudge}[/dim yellow]", err=True)
+        except Exception:
+            pass
+
+    if ctx.invoked_subcommand is None:
+        # Print the large ASCII banner
+        print_banner()
+        
+        # Simple "animation" for the entry point subtitle
+        subtitle = "Initializing performance-driven AIML engineering environment..."
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=True,
+        ) as progress:
+            progress.add_task(description=subtitle, total=None)
+            time.sleep(1.2)
+
+        console.print("\n[bold blue]CORE MODULES[/bold blue]")
+        console.print("[cyan]• Projects[/cyan]      Create and manage your ML workspaces")
+        console.print("[cyan]• Explore[/cyan]       Discover 500+ curated models and datasets")
+        console.print("[cyan]• Benchmark[/cyan]     Run high-performance hardware tests")
+        console.print("[cyan]• Training[/cyan]      Execute and monitor compute-heavy runs")
+        console.print("\n[grey50]Type [bold white]mlforge --help[/bold white] to see all available commands[/grey50]\n")
 
 if __name__ == "__main__":
     app()

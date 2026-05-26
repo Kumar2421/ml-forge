@@ -55,12 +55,14 @@ class ModelRegistry:
         if source:
             params["source"] = source
 
-        data = self._http.get("/models", params=params)
+        data = self._http.post("/models", json_body=params)
         return [Model(**m) for m in data]
 
     def get(self, model_id: str) -> Model:
-        data = self._http.get(f"/models/{model_id}")
-        return Model(**data)
+        data = self._http.post("/models", json_body={"model_id": model_id})
+        if isinstance(data, list) and data:
+            return Model(**data[0])
+        raise ApiError(f"Model {model_id!r} not found via gateway")
 
     def download(self, model_id: str) -> Job:
         """Trigger a model download job"""
