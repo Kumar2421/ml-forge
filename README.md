@@ -328,22 +328,7 @@ Data flow: Cloud → Metadata only. Compute + data = local.
 - [ ] npm package for JavaScript/TypeScript workflows
 - [ ] Annotation marketplace
 
----
 
-## Contributing
-
-MLForge core engine is proprietary. The SDK and CLI are open for community contributions.
-
-```bash
-git clone https://github.com/Kumar2421/mlforge
-cd mlforge/packages/mlforge_sdk
-pip install -e ".[dev]"
-pytest tests/
-```
-
-Issues, feature requests, and discussions: [GitHub Issues](https://github.com/Kumar2421/mlforge/issues)
-
----
 
 ## License
 
