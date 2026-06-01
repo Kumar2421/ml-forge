@@ -2,10 +2,14 @@
 
 # ⚒️ MLForge
 
+<img src="packages/mlforge_sdk/asset/hero.png" alt="MLForge Studio Dashboard" width="100%">
+
 **The Unified AI/ML Engineering Platform — Local-First, Full Lifecycle.**
 
 [![PyPI](https://img.shields.io/pypi/v/mlforge-sdk?label=pip%20install%20mlforge-sdk&color=7c3aed)](https://pypi.org/project/mlforge-sdk/)
+[![npm](https://img.shields.io/npm/v/mlforge-studio?label=npm%20install%20mlforge-studio&color=cc3534)](https://www.npmjs.com/package/mlforge-studio)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://mlforge.in)
 [![Discord](https://img.shields.io/badge/community-Discord-5865F2.svg)](https://mlforge.in/discord)
@@ -44,6 +48,7 @@ Discover Models → Import Datasets → Train → Test Inference → Benchmark �
 | Benchmark Suite | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Desktop App | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Python SDK | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **npm / JS SDK** | ✅ | ❌ | ⚠️ | ❌ | ❌ |
 | **Data stays local** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **No cloud required** | ✅ | ❌ | ❌ | ❌ | ❌ |
 
@@ -51,14 +56,27 @@ Discover Models → Import Datasets → Train → Test Inference → Benchmark �
 
 ## Installation
 
+**Python** (SDK + CLI):
 ```bash
 pip install mlforge-sdk mlforge-cli
+```
+
+**JavaScript / TypeScript** (npm):
+```bash
+npm install mlforge-studio
+# or
+npx mlforge-studio start
 ```
 
 Start the local studio:
 
 ```bash
+# Python CLI
 mlforge start
+
+# Node.js
+npx mlforge-studio start
+
 # Studio running at http://localhost:8005
 # Desktop dashboard opens automatically
 ```
@@ -169,6 +187,43 @@ for r in results:
 
 ---
 
+## JavaScript / TypeScript SDK
+
+```bash
+npm install mlforge-studio
+```
+
+```typescript
+import { MLForge } from 'mlforge-studio';
+
+const forge = new MLForge(); // connects to local engine
+
+// List available models
+const models = await forge.models.list({ task: 'object-detection', downloaded: true });
+console.log(`Found ${models.length} local models`);
+
+// Start a training run
+const run = await forge.train.start({
+  modelId: 'yolov8-nano-detection',
+  datasetId: 'my-dataset',
+  task: 'detection',
+  params: { epochs: 100, batchSize: 16, lr: 0.01 }
+});
+console.log(`Training run #${run.runNumber} started`);
+
+// Run inference
+const result = await forge.inference.run({
+  modelId: models[0].id,
+  imageBase64: myBase64Image,
+  yoloConfig: { confidence: 0.25, iouThreshold: 0.45 }
+});
+console.log(`Detected ${result.detections.length} objects in ${result.totalMs}ms`);
+```
+
+> **Useful for:** Next.js AI apps, Node.js automation pipelines, CI/CD workflows, browser-based tooling.
+
+---
+
 ## CLI Reference
 
 ```bash
@@ -194,6 +249,10 @@ mlforge benchmark run --model yolov8-nano --dataset my-dataset --source video
 # Start training (CLI)
 mlforge train start --model yolov8-nano --dataset my-dataset --epochs 100
 ```
+
+<img src="packages/mlforge_sdk/asset/models-list.png" alt="MLForge CLI — Model Registry" width="100%">
+
+*`mlforge explore models` — browse 600+ models directly from the terminal*
 
 ---
 
