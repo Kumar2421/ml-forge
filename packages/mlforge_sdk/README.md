@@ -100,5 +100,129 @@ MLForge separates the **Control Plane** (Discovery) from the **Data Plane** (Exe
 
 ---
 
+## 📊 Project-Based Workflow (Complete ML Lifecycle)
+
+Create a project first, then manage all operations (training, inference, benchmarking) within that project scope:
+
+```python
+from mlforge_sdk import MLForge
+import time
+
+# Initialize
+forge = MLForge(host="127.0.0.1", port=8005)
+
+# 1. Create Project
+project = forge.projects.create({"name": "detection-v2"})
+print(f"Project ID: {project.id}")
+
+# 2. Select Model & Dataset
+models = forge.models.list(task="detection")
+model = models[0]
+
+datasets = forge.datasets.list(task="detection")
+dataset = datasets[0]
+
+# 3. Train
+run_resp = forge.train.start({
+    "project_id": project.id,
+    "model_id": model.id,
+    "dataset_id": dataset.id,
+    "task": "detection",
+    "epochs": 50,
+    "batch_size": 16,
+})
+run_id = run_resp["run_id"]
+
+# Monitor training
+while True:
+    run = forge.train.get(run_id)
+    print(f"Epoch {run.epoch}/{run.total_epochs}")
+    if run.status in ["completed", "failed"]:
+        break
+    time.sleep(5)
+
+# 4. Run Inference
+import base64
+with open("test_image.jpg", "rb") as f:
+    image_b64 = base64.b64encode(f.read()).decode()
+
+result = forge.inference.run({
+    "project_id": project.id,
+    "model_id": model.id,
+    "task": "detection",
+    "image_base64": image_b64,
+})
+print(f"Detections: {result.get('detections')}")
+
+# 5. Benchmark
+bench_resp = forge.benchmark.run({
+    "project_id": project.id,
+    "model_id": model.id,
+    "dataset_id": dataset.id,
+    "task": "detection",
+    "framework": "pytorch",
+})
+job_id = bench_resp["job_id"]
+
+# Wait for benchmark
+while True:
+    job = forge.benchmark.get_job(job_id)
+    if job.status in ["completed", "failed"]:
+        break
+    time.sleep(5)
+
+result = forge.benchmark.get_result(job_id)
+print(f"mAP: {result.metrics.get('mAP')}")
+print(f"Latency: {result.metrics.get('latency_ms')}ms")
+
+# 6. Export Model
+export_resp = forge.exports.start({
+    "project_id": project.id,
+    "run_id": run_id,
+    "format": "onnx",
+})
+export_id = export_resp["job_id"]
+
+# Wait and download
+while True:
+    exp = forge.exports.get(export_id)
+    if exp.status == "completed":
+        break
+    time.sleep(5)
+
+export_bytes = forge.exports.download(export_id)
+with open("model.onnx", "wb") as f:
+    f.write(export_bytes)
+```
+
+### CLI: Train with Live Metrics
+
+```bash
+# Start training with progress bar + real-time metrics
+mlforge train start \
+  --project-id abc123 \
+  --model-id yolov8n \
+  --dataset-id rf-coco \
+  --task detection \
+  --epochs 100 \
+  --batch-size 16 \
+  --device cuda
+```
+
+### CLI: Benchmark with Terminal UI
+
+```bash
+# Run benchmark with live progress
+mlforge benchmark run \
+  --project-id abc123 \
+  --model-id yolov8n \
+  --dataset-id rf-coco \
+  --framework pytorch \
+  --precision fp32 \
+  --batch-size 32
+```
+
+---
+
 ## 📄 License
 © 2026 MLForge Team. All rights reserved. Proprietary software. For commercial licensing, contact [sales@mlforge.ai](mailto:sales@mlforge.ai).

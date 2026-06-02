@@ -85,21 +85,47 @@ def _handle_api_error(e: Exception):
     """
     Common error handler for SDK/API calls.
     Suggests 'mlforge start' if connection fails.
+    Handles 402 quota exceeded errors specially.
     """
     import requests
     from mlforge_sdk.http import ApiError
-    
+
     if isinstance(e, requests.exceptions.ConnectionError):
         console.print("\n[bold red]Error: Could not connect to the MLForge Engine.[/bold red]")
         console.print("[yellow]The local backend might be offline.[/yellow]")
         console.print("\n[bold green]To start the backend, run:[/bold green]")
         console.print("  [white]mlforge start[/white]\n")
         raise typer.Exit(code=1)
-    
+
     if isinstance(e, ApiError):
+        # Handle 402 Payment Required (quota exceeded)
+        if e.status == 402:
+            console.print("\n[bold red]Limit exceeded[/bold red]")
+
+            # Extract quota details from payload if available
+            if e.payload and isinstance(e.payload, dict):
+                resource = e.payload.get("resource", "unknown")
+                used = e.payload.get("used", "?")
+                limit = e.payload.get("limit", "?")
+                console.print(f"[error]{resource}: {used}/{limit}[/error]")
+                console.print("[yellow]You've reached your free tier limit[/yellow]")
+
+                upgrade_url = e.payload.get("upgrade_url")
+                if upgrade_url:
+                    console.print(f"[info]Upgrade to Pro: {upgrade_url}[/info]")
+                else:
+                    console.print("[info]Upgrade to Pro for unlimited access: https://mlforge.in/upgrade[/info]")
+            else:
+                console.print("[error]You've reached your quota limit[/error]")
+                console.print("[info]Upgrade to Pro: https://mlforge.in/upgrade[/info]")
+
+            console.print()
+            raise typer.Exit(code=1)
+
+        # All other API errors
         console.print(f"\n[bold red]API Error:[/bold red] {str(e)}")
         raise typer.Exit(code=1)
-    
+
     raise e
 
 
@@ -517,6 +543,94 @@ def explore_download_model(
         else:
             console.print(f"[error]Download failed for {model_id}: {job.status}[/error]")
 
+@train_app.command("start")
+def train_start(
+    project_id: str = typer.Option(..., "--project-id", "-p", help="Project ID"),
+    model_id: str = typer.Option(..., "--model-id", "-m", help="Model ID"),
+    dataset_id: str = typer.Option(..., "--dataset-id", "-d", help="Dataset ID"),
+    task: str = typer.Option("detection", "--task", "-t", help="Task type"),
+    epochs: int = typer.Option(50, "--epochs", "-e", help="Number of epochs"),
+    batch_size: int = typer.Option(16, "--batch-size", "-b", help="Batch size"),
+    learning_rate: float = typer.Option(0.01, "--lr", help="Learning rate"),
+    device: str = typer.Option("auto", "--device", help="Device (cpu|cuda|auto)"),
+    host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+):
+    """Start a training run with live metrics display."""
+    try:
+        sdk = _sdk(host, port)
+
+        console.print(f"\n[bold cyan]Starting Training Run[/bold cyan]")
+        console.print(f"  Model: [green]{model_id}[/green]")
+        console.print(f"  Dataset: [green]{dataset_id}[/green]")
+        console.print(f"  Task: [yellow]{task}[/yellow]")
+        console.print(f"  Epochs: [blue]{epochs}[/blue]\n")
+
+        # Start training
+        with console.status("[yellow]Initializing training...[/yellow]"):
+            response = sdk.train.start(
+                project_id=project_id,
+                model_id=model_id,
+                dataset_id=dataset_id,
+                task=task,
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=learning_rate,
+                device=device,
+            )
+            run_id = response.get("run_id")
+
+        if not run_id:
+            console.print("[error]Failed to start training: no run_id returned[/error]")
+            raise typer.Exit(code=1)
+
+        console.print(f"[success]✓ Training started: {run_id}[/success]\n")
+
+        # Monitor progress
+        last_epoch = 0
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            transient=False,
+        ) as progress:
+            task_id = progress.add_task(f"Training {model_id}", total=epochs)
+
+            while True:
+                try:
+                    run = sdk.train.get(run_id)
+
+                    if run.status in ["completed", "failed", "stopped"]:
+                        progress.update(task_id, completed=epochs)
+                        break
+
+                    if run.epoch > last_epoch:
+                        progress.update(task_id, advance=(run.epoch - last_epoch))
+                        last_epoch = run.epoch
+
+                    time.sleep(2)
+                except Exception as e:
+                    console.print(f"[warning]Monitor error: {str(e)}[/warning]")
+                    time.sleep(5)
+
+        # Final summary
+        run = sdk.train.get(run_id)
+        summary_table = Table(title=f"Training Summary - {run_id}", box=None)
+        summary_table.add_column("Metric", style="cyan")
+        summary_table.add_column("Value", style="green")
+        summary_table.add_row("Status", run.status.upper())
+        summary_table.add_row("Total Epochs", str(run.epoch))
+        for metric_key, metric_val in (run.metrics or {}).items():
+            summary_table.add_row(metric_key, f"{metric_val:.4f}")
+
+        console.print(Panel(summary_table, border_style="green", title="[bold green]Complete[/bold green]"))
+
+    except Exception as e:
+        _handle_api_error(e)
+
+
 @train_app.command("runs")
 def train_list_runs(
     host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
@@ -751,6 +865,101 @@ def dataset_analytics(
             dist_table.add_row(c.get("name", "—"), str(count), "█" * bar_width)
         
         console.print(dist_table)
+
+@benchmark_app.command("run")
+def benchmark_run(
+    project_id: str = typer.Option(..., "--project-id", "-p", help="Project ID"),
+    model_id: str = typer.Option(..., "--model-id", "-m", help="Model ID"),
+    dataset_id: Optional[str] = typer.Option(None, "--dataset-id", "-d", help="Dataset ID (optional)"),
+    task: Optional[str] = typer.Option(None, "--task", "-t", help="Task type"),
+    framework: str = typer.Option("pytorch", "--framework", "-f", help="Framework"),
+    hardware: str = typer.Option("auto", "--hardware", help="Hardware type"),
+    precision: str = typer.Option("fp32", "--precision", help="Precision (fp32|fp16|int8)"),
+    batch_size: int = typer.Option(32, "--batch-size", "-b", help="Batch size"),
+    host: Optional[str] = typer.Option(None, "--host", help="Backend host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Backend port"),
+):
+    """Run a benchmark with live progress and metrics."""
+    try:
+        sdk = _sdk(host, port)
+
+        console.print(f"\n[bold cyan]Starting Benchmark[/bold cyan]")
+        console.print(f"  Model: [green]{model_id}[/green]")
+        console.print(f"  Framework: [yellow]{framework}[/yellow]")
+        console.print(f"  Precision: [blue]{precision}[/blue]")
+        console.print(f"  Hardware: [magenta]{hardware}[/magenta]\n")
+
+        # Start benchmark
+        with console.status("[yellow]Initializing benchmark...[/yellow]"):
+            response = sdk.benchmark.run(
+                project_id=project_id,
+                model_id=model_id,
+                dataset_id=dataset_id,
+                task=task,
+                framework=framework,
+                hardware=hardware,
+                precision=precision,
+                batch_size=batch_size,
+            )
+            job_id = response.get("job_id")
+
+        if not job_id:
+            console.print("[error]Failed to start benchmark: no job_id returned[/error]")
+            raise typer.Exit(code=1)
+
+        console.print(f"[success]✓ Benchmark started: {job_id}[/success]\n")
+
+        # Monitor progress
+        last_progress = 0.0
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            transient=False,
+        ) as progress:
+            bench_task = progress.add_task(f"Benchmarking {model_id}", total=100)
+
+            while True:
+                try:
+                    job = sdk.benchmark.get_job(job_id)
+
+                    if job.status in ["completed", "failed", "cancelled"]:
+                        progress.update(bench_task, completed=100)
+                        break
+
+                    current_progress = min(job.progress or last_progress, 99.9)
+                    if current_progress > last_progress:
+                        progress.update(bench_task, completed=current_progress)
+                        last_progress = current_progress
+
+                    time.sleep(1)
+                except Exception as e:
+                    console.print(f"[warning]Monitor error: {str(e)}[/warning]")
+                    time.sleep(5)
+
+        # Fetch and display results
+        try:
+            result = sdk.benchmark.get_result(job_id)
+            metrics_table = Table(title=f"Benchmark Results - {job_id}", box=None)
+            metrics_table.add_column("Metric", style="cyan")
+            metrics_table.add_column("Value", style="green")
+
+            for key, val in (result.metrics or {}).items():
+                if isinstance(val, float):
+                    metrics_table.add_row(key, f"{val:.4f}")
+                else:
+                    metrics_table.add_row(key, str(val))
+
+            console.print(Panel(metrics_table, border_style="green", title="[bold green]Benchmark Complete[/bold green]"))
+        except Exception as e:
+            console.print(f"[warning]Could not fetch full results: {str(e)}[/warning]")
+            console.print(f"[info]Job ID for reference: {job_id}[/info]")
+
+    except Exception as e:
+        _handle_api_error(e)
+
 
 @benchmark_app.command("results")
 def benchmark_results(
